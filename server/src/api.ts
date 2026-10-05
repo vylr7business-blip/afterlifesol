@@ -45,6 +45,18 @@ export function createApi(db: DB) {
   const app = express();
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "8kb" }));
+  // Private mode: the site is hidden behind a "coming soon" page until SITE_OPEN=1 is set on Railway.
+  // The graveyard keeps filling in the background either way.
+  app.use((req, res, next) => {
+    if (process.env.SITE_OPEN === "1" || req.path === "/api/status") return next();
+    res.status(503).setHeader("cache-control", "no-store");
+    if (req.path.startsWith("/api/")) return res.json({ error: "closed" });
+    res.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Afterlife</title><meta name="robots" content="noindex">
+<style>html,body{height:100%;margin:0;background:#07070b;color:#8b8a9b;font:14px/1.6 ui-monospace,Menlo,monospace;display:grid;place-items:center;text-align:center;letter-spacing:.3em}
+svg{width:56px;height:70px;image-rendering:pixelated;margin-bottom:22px}</style></head><body><div>
+<svg viewBox="0 0 8 10" shape-rendering="crispEdges"><rect x="2" width="4" height="1" fill="#efeef4"/><rect x="1" y="1" width="6" height="1" fill="#efeef4"/><rect y="2" width="8" height="6" fill="#efeef4"/><rect x="3" y="3" width="2" height="4" fill="#07070b"/><rect x="2" y="4" width="4" height="1" fill="#07070b"/><rect y="8" width="8" height="2" fill="#eab464"/></svg>
+<div>COMING SOON</div></div></body></html>`);
+  });
   app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", CONFIG.corsOrigin);
     res.setHeader("Access-Control-Allow-Headers", "content-type, authorization");
