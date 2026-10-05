@@ -13,44 +13,61 @@ type PumpCoin = {
 };
 
 const HEADERS = { accept: "application/json", origin: "https://pump.fun", referer: "https://pump.fun/" };
-const SORTS = ["ath_market_cap", "created_timestamp", "last_trade_timestamp", "market_cap"];
+// Sort orders to page through. Each one pages ~2,000 deep, so several are combined.
+// "last_trade_timestamp ASC" is the gold mine: bonded coins nobody has traded in ages.
+const SORTS: Array<[string, "ASC" | "DESC"]> = [
+  ["last_trade_timestamp", "ASC"], ["created_timestamp", "ASC"], ["ath_market_cap", "DESC"],
+  ["last_trade_timestamp", "DESC"], ["created_timestamp", "DESC"], ["market_cap", "DESC"], ["market_cap", "ASC"],
+];
 const PAGE = 50, MAX_OFFSET = 1950;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function page(sort: string, offset: number): Promise<PumpCoin[] | null> {
-  try {
-    const u = `${PUMP_API}/coins?includeNsfw=false&complete=true&sort=${sort}&order=DESC&limit=${PAGE}&offset=${offset}`;
-    const r = await fetch(u, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return Array.isArray(j) ? (j as PumpCoin[]) : null;
-  } catch { return null; }
+async function page(sort: string, order: string, offset: number): Promise<PumpCoin[] | null> {
+  const u = `${PUMP_API}/coins?includeNsfw=false&complete=true&sort=${sort}&order=${order}&limit=${PAGE}&offset=${offset}`;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(u, { headers: HEADERS, signal: AbortSignal.timeout(20_000) });
+      if (r.ok) { const j = await r.json(); return Array.isArray(j) ? (j as PumpCoin[]) : []; }
+      console.warn(`[pump.fun] ${sort} ${order} @${offset}: HTTP ${r.status}, retrying`);
+    } catch (e) { console.warn(`[pump.fun] ${sort} ${order} @${offset}: ${(e as Error).message}, retrying`); }
+    await sleep([3_000, 10_000, 30_000, 0][attempt]);
+  }
+  return null;
 }
 
-/** Pull bonded coins from pump.fun (all sort orders), about every 30 minutes. */
-export async function syncPumpFun(db: DB) {
-  const seen = new Map<string, PumpCoin>();
-  for (const sort of SORTS) {
-    for (let off = 0; off <= MAX_OFFSET; off += PAGE) {
-      const list = await page(sort, off);
-      if (!list || !list.length) break;
-      for (const c of list) if (c.complete && !c.is_banned && (!c.chain_id || c.chain_id.startsWith("solana"))) seen.set(c.mint, c);
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-  const now = Date.now();
+function save(db: DB, list: PumpCoin[], now: number) {
   tx(db, () => {
     const up = db.prepare(`INSERT INTO coins (mint, symbol, name, image, creator, pool, token_program, decimals, created_at, ath_usd, ath_at, mcap_usd, last_trade_at, seen_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(mint) DO UPDATE SET symbol=excluded.symbol, name=excluded.name, image=excluded.image, pool=excluded.pool, ath_usd=excluded.ath_usd,
         ath_at=excluded.ath_at, mcap_usd=excluded.mcap_usd, last_trade_at=excluded.last_trade_at, seen_at=excluded.seen_at`);
-    for (const c of seen.values()) {
+    for (const c of list) {
+      if (!c.complete || c.is_banned || (c.chain_id && !c.chain_id.startsWith("solana"))) continue;
       up.run(c.mint, (c.symbol || "?").slice(0, 24), (c.name || "").slice(0, 64), c.image_uri ?? null, c.creator, c.pump_swap_pool ?? c.pool_address ?? null,
         c.token_program ?? null, c.base_decimals ?? 6, c.created_timestamp, c.ath_market_cap ?? null, c.ath_market_cap_timestamp ?? null,
         c.usd_market_cap ?? c.market_cap ?? null, c.last_trade_timestamp ?? null, now);
     }
   });
-  kvSet(db, "pumpfun_synced_at", String(now));
-  console.log(`[pump.fun] ${seen.size} bonded coins synced`);
+}
+
+/** Pull bonded coins from pump.fun (several sort orders). Saves each page as it arrives, so the graveyard fills up while it runs. */
+export async function syncPumpFun(db: DB) {
+  const seen = new Set<string>();
+  for (const [sort, order] of SORTS) {
+    let got = 0;
+    for (let off = 0; off <= MAX_OFFSET; off += PAGE) {
+      const list = await page(sort, order, off);
+      if (!list) { console.warn(`[pump.fun] gave up on ${sort} ${order} at ${off}`); break; }
+      if (!list.length) break;
+      save(db, list, Date.now());
+      for (const c of list) seen.add(c.mint);
+      got += list.length;
+      await sleep(1_200);
+    }
+    console.log(`[pump.fun] ${sort} ${order}: ${got} coins`);
+  }
+  kvSet(db, "pumpfun_synced_at", String(Date.now()));
+  console.log(`[pump.fun] ${seen.size} bonded coins synced this pass`);
 }
 
 type DexPair = { chainId: string; dexId: string; pairAddress: string; baseToken: { address: string }; priceUsd?: string; marketCap?: number; fdv?: number; liquidity?: { usd?: number }; volume?: { h24?: number } };

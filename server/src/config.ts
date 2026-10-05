@@ -41,7 +41,7 @@ export const CONFIG = {
   quietVol24hUsd: num("QUIET_VOL_24H_USD", 2_000),
   minDeadDays: num("MIN_DEAD_DAYS", 7),
   minPoolSol: num("MIN_POOL_SOL", 1),
-  maxDevPct: num("MAX_DEV_PCT", 2),
+  maxDevPct: num("MAX_DEV_PCT", 5),
   cooldownHours: num("COOLDOWN_HOURS", 24),
   ballotSize: num("BALLOT_SIZE", 10),
   voteLockMinute: num("VOTE_LOCK_MINUTE", 50),
