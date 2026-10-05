@@ -1,0 +1,29 @@
+{
+  "name": "afterlife-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Afterlife backend: pump.fun graveyard, hourly voting rounds, Jupiter pump bot with on-chain burns, and the website.",
+  "scripts": {
+    "start": "tsx src/index.ts all",
+    "api": "tsx src/index.ts api",
+    "worker": "tsx src/index.ts worker",
+    "test": "node --experimental-strip-types --no-warnings --import ./test/register.mjs --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "retry": "tsx src/retry.ts"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "tsx": "^4.19.2",
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.9"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
